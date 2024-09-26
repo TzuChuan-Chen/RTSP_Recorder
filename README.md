@@ -30,7 +30,7 @@
 
 ## 安裝指南
 1. 安裝 Python：
-   確保您的系統已安裝 Python 3.6 或更高版本。可以從 [Python 官方網站](https://www.python.org/downloads/) 下載並安裝。
+   確保您的系統已安裝 Python 3.9 或更高版本。可以從 [Python 官方網站](https://www.python.org/downloads/) 下載並安裝。
 
 2. 安裝 ffmpeg 和 ffplay：
    - Windows：
