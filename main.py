@@ -1,7 +1,10 @@
 import sys
 import os
+import csv
 from datetime import datetime
-from PyQt5.QtWidgets import QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton, QTableWidget, QTableWidgetItem, QFileDialog, QComboBox
+from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
+                             QLineEdit, QPushButton, QTableWidget, QTableWidgetItem, QFileDialog, 
+                             QHeaderView, QSizePolicy)
 from PyQt5.QtCore import Qt, QThread, pyqtSignal
 import subprocess
 import threading
@@ -89,14 +92,19 @@ class MainWindow(QMainWindow):
     def setup_ui(self):
         # 創建輸入欄位
         input_layout = QHBoxLayout()
+        
         self.url_input = QLineEdit()
         self.url_input.setPlaceholderText("RTSP URL")
-        input_layout.addWidget(QLabel("RTSP URL:"))
+        self.url_label = QLabel("RTSP URL:")
+        self.url_label.setSizePolicy(QSizePolicy.Minimum, QSizePolicy.Preferred)
+        input_layout.addWidget(self.url_label)
         input_layout.addWidget(self.url_input)
 
         self.output_dir_input = QLineEdit()
         self.output_dir_input.setPlaceholderText("輸出目錄")
-        input_layout.addWidget(QLabel("輸出目錄:"))
+        self.output_dir_label = QLabel("輸出目錄:")
+        self.output_dir_label.setSizePolicy(QSizePolicy.Minimum, QSizePolicy.Preferred)
+        input_layout.addWidget(self.output_dir_label)
         input_layout.addWidget(self.output_dir_input)
 
         self.browse_button = QPushButton("瀏覽")
@@ -105,7 +113,9 @@ class MainWindow(QMainWindow):
 
         self.prefix_input = QLineEdit()
         self.prefix_input.setPlaceholderText("前綴")
-        input_layout.addWidget(QLabel("前綴:"))
+        self.prefix_label = QLabel("前綴:")
+        self.prefix_label.setSizePolicy(QSizePolicy.Minimum, QSizePolicy.Preferred)
+        input_layout.addWidget(self.prefix_label)
         input_layout.addWidget(self.prefix_input)
 
         self.add_button = QPushButton("新增串流")
@@ -115,9 +125,15 @@ class MainWindow(QMainWindow):
         self.layout.addLayout(input_layout)
 
         # 創建串流列表
-        self.streams_table = QTableWidget(0, 3)
-        self.streams_table.setHorizontalHeaderLabels(["RTSP URL", "輸出目錄", "前綴"])
+        self.streams_table = QTableWidget(0, 4)
+        self.streams_table.setHorizontalHeaderLabels(["RTSP URL", "輸出目錄", "前綴", "操作"])
+        self.streams_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         self.layout.addWidget(self.streams_table)
+
+        # 批量導入按鈕
+        self.bulk_import_button = QPushButton("批量導入")
+        self.bulk_import_button.clicked.connect(self.bulk_import)
+        self.layout.addWidget(self.bulk_import_button)
 
         # 創建控制按鈕
         control_layout = QHBoxLayout()
@@ -145,15 +161,45 @@ class MainWindow(QMainWindow):
         if not url or not output_dir or not prefix:
             return
 
+        self.add_stream_to_table(url, output_dir, prefix)
+
+        self.url_input.clear()
+        self.output_dir_input.clear()
+        self.prefix_input.clear()
+
+    def add_stream_to_table(self, url, output_dir, prefix):
         row = self.streams_table.rowCount()
         self.streams_table.insertRow(row)
         self.streams_table.setItem(row, 0, QTableWidgetItem(url))
         self.streams_table.setItem(row, 1, QTableWidgetItem(output_dir))
         self.streams_table.setItem(row, 2, QTableWidgetItem(prefix))
 
-        self.url_input.clear()
-        self.output_dir_input.clear()
-        self.prefix_input.clear()
+        preview_button = QPushButton("預覽")
+        preview_button.clicked.connect(lambda: self.preview_camera(url))
+        self.streams_table.setCellWidget(row, 3, preview_button)
+
+    def preview_camera(self, url):
+        # 使用 ffplay 預覽 RTSP 串流
+        command = [
+            "ffplay",
+            "-rtsp_transport", "tcp",
+            "-i", url,
+            "-fflags", "nobuffer",
+            "-flags", "low_delay",
+            "-framedrop",
+            "-sync", "ext"
+        ]
+        subprocess.Popen(command)
+
+    def bulk_import(self):
+        file_name, _ = QFileDialog.getOpenFileName(self, "選擇 CSV 文件", "", "CSV Files (*.csv)")
+        if file_name:
+            with open(file_name, 'r') as file:
+                csv_reader = csv.reader(file)
+                for row in csv_reader:
+                    if len(row) == 3:
+                        url, output_dir, prefix = row
+                        self.add_stream_to_table(url, output_dir, prefix)
 
     def start_recording(self):
         self.recording_manager.recorders.clear()
