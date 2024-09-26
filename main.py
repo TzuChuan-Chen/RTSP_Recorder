@@ -98,7 +98,7 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("RTSP 多串流錄製程式")
-        self.setGeometry(100, 100, 800, 600)
+        self.setGeometry(100, 100, 800, 550)
 
         self.central_widget = QWidget()
         self.setCentralWidget(self.central_widget)
@@ -110,7 +110,6 @@ class MainWindow(QMainWindow):
         self.recording_manager.recording_time_updated.connect(self.update_recording_times)
 
     def setup_ui(self):
-        # 創建輸入欄位
         input_layout = QHBoxLayout()
         
         self.url_input = QLineEdit()
@@ -157,7 +156,7 @@ class MainWindow(QMainWindow):
         self.streams_table.setColumnWidth(2, 80)  
         self.streams_table.setColumnWidth(3, 80)  
         self.streams_table.setColumnWidth(4, 80)  
-        self.streams_table.setMinimumSize(810, 300)  # Adjust as necessary
+        self.streams_table.setMinimumSize(850, 250)  # Adjust as necessary
         self.layout.addWidget(self.streams_table)
 
 
@@ -196,7 +195,6 @@ class MainWindow(QMainWindow):
         self.layout.addWidget(splitter)
     def closeEvent(self, event):
         if self.recording_manager.is_recording:
-            # 顯示提示訊息
             reply = QMessageBox.warning(self, '正在錄影', '目前正在錄影，請先停止錄影再關閉程式。', QMessageBox.Ok)
             # 阻止關閉事件
             event.ignore()
