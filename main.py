@@ -4,12 +4,14 @@ import csv
 from datetime import datetime
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
                              QLineEdit, QPushButton, QTableWidget, QTableWidgetItem, QFileDialog, 
-                             QHeaderView, QSplitter)
+                             QHeaderView, QSplitter, QMessageBox)
+
 from PyQt5.QtCore import Qt, QThread, pyqtSignal, QTimer
 from PyQt5.QtGui import QFont
 import subprocess
 import threading
 import time
+
 
 class RTSPRecorder:
     def __init__(self, url, output_dir, prefix):
@@ -143,20 +145,31 @@ class MainWindow(QMainWindow):
         input_widget = QWidget()
         input_widget.setLayout(input_layout)
         self.layout.addWidget(input_widget)
-
         # 創建串流列表
         self.streams_table = QTableWidget(0, 5)
         self.streams_table.setHorizontalHeaderLabels(["RTSP URL", "輸出目錄", "前綴", "錄製時間", "操作"])
-        self.streams_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
-        self.streams_table.horizontalHeader().setMinimumSectionSize(160)  # Adjust the value as needed
+
+        # Set resize mode for RTSP URL and 輸出目錄 to ResizeToContents
+        self.streams_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)  # RTSP URL
+        self.streams_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)  # 輸出目錄
+        self.streams_table.setColumnWidth(0, 200)  
+        self.streams_table.setColumnWidth(1, 200) 
+        self.streams_table.setColumnWidth(2, 80)  
+        self.streams_table.setColumnWidth(3, 80)  
+        self.streams_table.setColumnWidth(4, 80)  
+        self.streams_table.setMinimumSize(810, 300)  # Adjust as necessary
         self.layout.addWidget(self.streams_table)
 
 
-
         # 批量導入按鈕
-        self.bulk_import_button = QPushButton("批量導入")
+        self.bulk_import_button = QPushButton("導入設定")
         self.bulk_import_button.clicked.connect(self.bulk_import)
         self.layout.addWidget(self.bulk_import_button)
+        
+        # Add the Save Settings button
+        self.save_button = QPushButton("儲存設定")
+        self.save_button.clicked.connect(self.save_settings)
+        self.layout.addWidget(self.save_button)
 
         # 創建控制按鈕
         control_layout = QHBoxLayout()
@@ -181,6 +194,15 @@ class MainWindow(QMainWindow):
         splitter.addWidget(control_widget)
         
         self.layout.addWidget(splitter)
+    def closeEvent(self, event):
+        if self.recording_manager.is_recording:
+            # 顯示提示訊息
+            reply = QMessageBox.warning(self, '正在錄影', '目前正在錄影，請先停止錄影再關閉程式。', QMessageBox.Ok)
+            # 阻止關閉事件
+            event.ignore()
+        else:
+            # 如果沒有在錄影，允許關閉應用程式
+            event.accept()
 
     def browse_output_dir(self):
         folder = QFileDialog.getExistingDirectory(self, "選擇輸出目錄")
@@ -221,8 +243,10 @@ class MainWindow(QMainWindow):
             "-fflags", "nobuffer",
             "-flags", "low_delay",
             "-framedrop",
-            "-sync", "ext"
+            "-sync", "ext",
+            "-vf", "fps=30,scale=640:480"
         ]
+
         subprocess.Popen(command)
 
     def bulk_import(self):
@@ -234,6 +258,22 @@ class MainWindow(QMainWindow):
                     if len(row) == 3:
                         url, output_dir, prefix = row
                         self.add_stream_to_table(url, output_dir, prefix)
+
+    def save_settings(self):
+        file_name, _ = QFileDialog.getSaveFileName(self, "儲存設定", "", "CSV Files (*.csv)")
+        if file_name:
+            if not file_name.endswith('.csv'):
+                file_name += '.csv'
+
+            with open(file_name, 'w', newline='', encoding='utf-8') as file:
+                csv_writer = csv.writer(file)
+                # Iterate over the table rows and write each row to the CSV
+                for row in range(self.streams_table.rowCount()):
+                    url = self.streams_table.item(row, 0).text()
+                    output_dir = self.streams_table.item(row, 1).text()
+                    prefix = self.streams_table.item(row, 2).text()
+                    csv_writer.writerow([url, output_dir, prefix])
+
 
     def start_recording(self):
         self.recording_manager.recorders.clear()
