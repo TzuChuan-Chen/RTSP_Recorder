@@ -1,0 +1,183 @@
+import sys
+import os
+from datetime import datetime
+from PyQt5.QtWidgets import QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton, QTableWidget, QTableWidgetItem, QFileDialog, QComboBox
+from PyQt5.QtCore import Qt, QThread, pyqtSignal
+import subprocess
+import threading
+import time
+
+class RTSPRecorder:
+    def __init__(self, url, output_dir, prefix):
+        self.url = url
+        self.output_dir = output_dir
+        self.prefix = prefix
+        self.process = None
+        self.is_recording = False
+
+    def start_recording(self):
+        if self.is_recording:
+            return
+        
+        self.is_recording = True
+        current_time = datetime.now().strftime("%y%m%d_%H%M%S")
+        output_filename = f"{self.prefix}{current_time}.mkv"
+        output_path = os.path.join(self.output_dir, output_filename)
+        
+        command = [
+            "ffmpeg",
+            "-rtsp_transport", "tcp",
+            "-i", self.url,
+            "-c", "copy",
+            "-y",
+            output_path
+        ]
+        
+        self.process = subprocess.Popen(command, stdin=subprocess.PIPE)
+
+    def stop_recording(self):
+        if not self.is_recording:
+            return
+        
+        self.is_recording = False
+        self.process.stdin.write(b'q')
+        self.process.stdin.flush()
+        self.process.wait()
+        self.process = None
+
+class RecordingManager(QThread):
+    recording_finished = pyqtSignal()
+
+    def __init__(self):
+        super().__init__()
+        self.recorders = []
+        self.is_recording = False
+
+    def add_recorder(self, recorder):
+        self.recorders.append(recorder)
+
+    def start_recording(self):
+        self.is_recording = True
+        for recorder in self.recorders:
+            recorder.start_recording()
+        self.start()
+
+    def stop_recording(self):
+        self.is_recording = False
+        for recorder in self.recorders:
+            recorder.stop_recording()
+
+    def run(self):
+        while self.is_recording:
+            time.sleep(1)
+        self.recording_finished.emit()
+
+class MainWindow(QMainWindow):
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle("RTSP 多串流錄製程式")
+        self.setGeometry(100, 100, 800, 600)
+
+        self.central_widget = QWidget()
+        self.setCentralWidget(self.central_widget)
+        self.layout = QVBoxLayout(self.central_widget)
+
+        self.setup_ui()
+        self.recording_manager = RecordingManager()
+        self.recording_manager.recording_finished.connect(self.on_recording_finished)
+
+    def setup_ui(self):
+        # 創建輸入欄位
+        input_layout = QHBoxLayout()
+        self.url_input = QLineEdit()
+        self.url_input.setPlaceholderText("RTSP URL")
+        input_layout.addWidget(QLabel("RTSP URL:"))
+        input_layout.addWidget(self.url_input)
+
+        self.output_dir_input = QLineEdit()
+        self.output_dir_input.setPlaceholderText("輸出目錄")
+        input_layout.addWidget(QLabel("輸出目錄:"))
+        input_layout.addWidget(self.output_dir_input)
+
+        self.browse_button = QPushButton("瀏覽")
+        self.browse_button.clicked.connect(self.browse_output_dir)
+        input_layout.addWidget(self.browse_button)
+
+        self.prefix_input = QLineEdit()
+        self.prefix_input.setPlaceholderText("前綴")
+        input_layout.addWidget(QLabel("前綴:"))
+        input_layout.addWidget(self.prefix_input)
+
+        self.add_button = QPushButton("新增串流")
+        self.add_button.clicked.connect(self.add_stream)
+        input_layout.addWidget(self.add_button)
+
+        self.layout.addLayout(input_layout)
+
+        # 創建串流列表
+        self.streams_table = QTableWidget(0, 3)
+        self.streams_table.setHorizontalHeaderLabels(["RTSP URL", "輸出目錄", "前綴"])
+        self.layout.addWidget(self.streams_table)
+
+        # 創建控制按鈕
+        control_layout = QHBoxLayout()
+        self.start_button = QPushButton("開始錄製")
+        self.start_button.clicked.connect(self.start_recording)
+        control_layout.addWidget(self.start_button)
+
+        self.stop_button = QPushButton("停止錄製")
+        self.stop_button.clicked.connect(self.stop_recording)
+        self.stop_button.setEnabled(False)
+        control_layout.addWidget(self.stop_button)
+
+        self.layout.addLayout(control_layout)
+
+    def browse_output_dir(self):
+        folder = QFileDialog.getExistingDirectory(self, "選擇輸出目錄")
+        if folder:
+            self.output_dir_input.setText(folder)
+
+    def add_stream(self):
+        url = self.url_input.text()
+        output_dir = self.output_dir_input.text()
+        prefix = self.prefix_input.text()
+
+        if not url or not output_dir or not prefix:
+            return
+
+        row = self.streams_table.rowCount()
+        self.streams_table.insertRow(row)
+        self.streams_table.setItem(row, 0, QTableWidgetItem(url))
+        self.streams_table.setItem(row, 1, QTableWidgetItem(output_dir))
+        self.streams_table.setItem(row, 2, QTableWidgetItem(prefix))
+
+        self.url_input.clear()
+        self.output_dir_input.clear()
+        self.prefix_input.clear()
+
+    def start_recording(self):
+        self.recording_manager.recorders.clear()
+        for row in range(self.streams_table.rowCount()):
+            url = self.streams_table.item(row, 0).text()
+            output_dir = self.streams_table.item(row, 1).text()
+            prefix = self.streams_table.item(row, 2).text()
+            
+            recorder = RTSPRecorder(url, output_dir, prefix)
+            self.recording_manager.add_recorder(recorder)
+
+        self.recording_manager.start_recording()
+        self.start_button.setEnabled(False)
+        self.stop_button.setEnabled(True)
+
+    def stop_recording(self):
+        self.recording_manager.stop_recording()
+
+    def on_recording_finished(self):
+        self.start_button.setEnabled(True)
+        self.stop_button.setEnabled(False)
+
+if __name__ == "__main__":
+    app = QApplication(sys.argv)
+    window = MainWindow()
+    window.show()
+    sys.exit(app.exec_())
