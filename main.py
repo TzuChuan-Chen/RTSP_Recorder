@@ -4,8 +4,9 @@ import csv
 from datetime import datetime
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
                              QLineEdit, QPushButton, QTableWidget, QTableWidgetItem, QFileDialog, 
-                             QHeaderView, QSizePolicy)
-from PyQt5.QtCore import Qt, QThread, pyqtSignal
+                             QHeaderView, QSplitter)
+from PyQt5.QtCore import Qt, QThread, pyqtSignal, QTimer
+from PyQt5.QtGui import QFont
 import subprocess
 import threading
 import time
@@ -17,19 +18,25 @@ class RTSPRecorder:
         self.prefix = prefix
         self.process = None
         self.is_recording = False
+        self.start_time = None
 
     def start_recording(self):
         if self.is_recording:
             return
         
         self.is_recording = True
-        current_time = datetime.now().strftime("%y%m%d_%H%M%S")
-        output_filename = f"{self.prefix}{current_time}.mkv"
-        output_path = os.path.join(self.output_dir, output_filename)
+        self.start_time = datetime.now()
+        current_time = self.start_time.strftime("%Y%m%d/%H/%M")
+        output_dir = os.path.join(self.output_dir, current_time)
+        os.makedirs(output_dir, exist_ok=True)
+        
+        output_filename = f"{self.prefix}{self.start_time.strftime('%Y%m%d_%H%M%S')}.mkv"
+        output_path = os.path.join(output_dir, output_filename)
         
         command = [
             "ffmpeg",
             "-rtsp_transport", "tcp",
+            "-use_wallclock_as_timestamps", "1",
             "-i", self.url,
             "-c", "copy",
             "-y",
@@ -47,9 +54,17 @@ class RTSPRecorder:
         self.process.stdin.flush()
         self.process.wait()
         self.process = None
+        self.start_time = None
+
+    def get_recording_time(self):
+        if not self.is_recording or self.start_time is None:
+            return "00:00:00"
+        elapsed = datetime.now() - self.start_time
+        return str(elapsed).split('.')[0]  # 移除微秒
 
 class RecordingManager(QThread):
     recording_finished = pyqtSignal()
+    recording_time_updated = pyqtSignal(list)
 
     def __init__(self):
         super().__init__()
@@ -72,6 +87,8 @@ class RecordingManager(QThread):
 
     def run(self):
         while self.is_recording:
+            recording_times = [recorder.get_recording_time() for recorder in self.recorders]
+            self.recording_time_updated.emit(recording_times)
             time.sleep(1)
         self.recording_finished.emit()
 
@@ -88,6 +105,7 @@ class MainWindow(QMainWindow):
         self.setup_ui()
         self.recording_manager = RecordingManager()
         self.recording_manager.recording_finished.connect(self.on_recording_finished)
+        self.recording_manager.recording_time_updated.connect(self.update_recording_times)
 
     def setup_ui(self):
         # 創建輸入欄位
@@ -96,14 +114,14 @@ class MainWindow(QMainWindow):
         self.url_input = QLineEdit()
         self.url_input.setPlaceholderText("RTSP URL")
         self.url_label = QLabel("RTSP URL:")
-        self.url_label.setSizePolicy(QSizePolicy.Minimum, QSizePolicy.Preferred)
+        self.url_label.setMinimumWidth(60)
         input_layout.addWidget(self.url_label)
         input_layout.addWidget(self.url_input)
 
         self.output_dir_input = QLineEdit()
         self.output_dir_input.setPlaceholderText("輸出目錄")
         self.output_dir_label = QLabel("輸出目錄:")
-        self.output_dir_label.setSizePolicy(QSizePolicy.Minimum, QSizePolicy.Preferred)
+        self.output_dir_label.setMinimumWidth(60)
         input_layout.addWidget(self.output_dir_label)
         input_layout.addWidget(self.output_dir_input)
 
@@ -114,7 +132,7 @@ class MainWindow(QMainWindow):
         self.prefix_input = QLineEdit()
         self.prefix_input.setPlaceholderText("前綴")
         self.prefix_label = QLabel("前綴:")
-        self.prefix_label.setSizePolicy(QSizePolicy.Minimum, QSizePolicy.Preferred)
+        self.prefix_label.setMinimumWidth(60)
         input_layout.addWidget(self.prefix_label)
         input_layout.addWidget(self.prefix_input)
 
@@ -122,13 +140,18 @@ class MainWindow(QMainWindow):
         self.add_button.clicked.connect(self.add_stream)
         input_layout.addWidget(self.add_button)
 
-        self.layout.addLayout(input_layout)
+        input_widget = QWidget()
+        input_widget.setLayout(input_layout)
+        self.layout.addWidget(input_widget)
 
         # 創建串流列表
-        self.streams_table = QTableWidget(0, 4)
-        self.streams_table.setHorizontalHeaderLabels(["RTSP URL", "輸出目錄", "前綴", "操作"])
-        self.streams_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        self.streams_table = QTableWidget(0, 5)
+        self.streams_table.setHorizontalHeaderLabels(["RTSP URL", "輸出目錄", "前綴", "錄製時間", "操作"])
+        self.streams_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
+        self.streams_table.horizontalHeader().setMinimumSectionSize(160)  # Adjust the value as needed
         self.layout.addWidget(self.streams_table)
+
+
 
         # 批量導入按鈕
         self.bulk_import_button = QPushButton("批量導入")
@@ -146,7 +169,18 @@ class MainWindow(QMainWindow):
         self.stop_button.setEnabled(False)
         control_layout.addWidget(self.stop_button)
 
-        self.layout.addLayout(control_layout)
+        control_widget = QWidget()
+        control_widget.setLayout(control_layout)
+        self.layout.addWidget(control_widget)
+
+        # 創建 QSplitter
+        splitter = QSplitter(Qt.Vertical)
+        splitter.addWidget(input_widget)
+        splitter.addWidget(self.streams_table)
+        splitter.addWidget(self.bulk_import_button)
+        splitter.addWidget(control_widget)
+        
+        self.layout.addWidget(splitter)
 
     def browse_output_dir(self):
         folder = QFileDialog.getExistingDirectory(self, "選擇輸出目錄")
@@ -173,13 +207,13 @@ class MainWindow(QMainWindow):
         self.streams_table.setItem(row, 0, QTableWidgetItem(url))
         self.streams_table.setItem(row, 1, QTableWidgetItem(output_dir))
         self.streams_table.setItem(row, 2, QTableWidgetItem(prefix))
+        self.streams_table.setItem(row, 3, QTableWidgetItem("00:00:00"))
 
         preview_button = QPushButton("預覽")
         preview_button.clicked.connect(lambda: self.preview_camera(url))
-        self.streams_table.setCellWidget(row, 3, preview_button)
+        self.streams_table.setCellWidget(row, 4, preview_button)
 
     def preview_camera(self, url):
-        # 使用 ffplay 預覽 RTSP 串流
         command = [
             "ffplay",
             "-rtsp_transport", "tcp",
@@ -221,6 +255,10 @@ class MainWindow(QMainWindow):
     def on_recording_finished(self):
         self.start_button.setEnabled(True)
         self.stop_button.setEnabled(False)
+
+    def update_recording_times(self, times):
+        for row, time in enumerate(times):
+            self.streams_table.setItem(row, 3, QTableWidgetItem(time))
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
